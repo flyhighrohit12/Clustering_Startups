@@ -88,6 +88,25 @@ def preprocess_data(df, features):
     except Exception as e:
         st.error(f"Error preprocessing data: {str(e)}")
         return None, None
+    
+def preprocess_employees(value):
+    if pd.isna(value):
+        return np.nan
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        value = value.replace(',', '').strip().lower()
+        if '-' in value:
+            low, high = map(lambda x: float(x.strip()), value.split('-'))
+            return (low + high) / 2
+        elif '+' in value:
+            return float(value.replace('+', ''))
+        else:
+            try:
+                return float(value)
+            except ValueError:
+                return np.nan
+    return np.nan
 
 def convert_employees(value):
     if pd.isna(value):
@@ -237,71 +256,175 @@ if df is None:
 else:
     # Main content
     if page == "Home":
-        st.title("🚀 Clustering Analysis of Top 300 Indian Startups")
-        st.write("Welcome to our premium startup analysis tool. Dive into the world of Indian startups and uncover hidden patterns!")
+        st.title("🚀 Indian Startup Ecosystem Analysis")
+        st.markdown("""
+        <style>
+        .big-font {
+            font-size:20px !important;
+            font-weight: bold;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        st.markdown('<p class="big-font">Uncover insights from the top 300 Indian startups</p>', unsafe_allow_html=True)
+
+        # Key Statistics
+        col1, col2, col3, col4 = st.columns(4)
         
-        # Dataset overview
-        st.header("📊 Dataset Overview")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Startups", f"{len(df):,}")
-        with col2:
-            st.metric("Average Funding", f"${df['Funding Amount in $'].mean():,.2f}")
-        with col3:
-            st.metric("Most Common City", df['City'].mode()[0])
-        
-        # Most common industries
-        st.subheader("🏭 Top 5 Industries")
-        top_industries = df['Industries'].str.split(', ', expand=True).stack().value_counts().head(5)
-        fig = px.pie(values=top_industries.values, names=top_industries.index, title="Top 5 Industries",
-                     color_discrete_sequence=COLOR_PALETTE)
-        fig.update_traces(textposition='inside', textinfo='percent+label')
+        total_funding = df['Funding Amount in $'].sum()
+        avg_funding = df['Funding Amount in $'].mean()
+        total_startups = len(df)
+        unique_cities = df['City'].nunique()
+
+        col1.metric("Total Funding", f"${total_funding:,.0f}")
+        col2.metric("Average Funding", f"${avg_funding:,.0f}")
+        col3.metric("Total Startups", f"{total_startups}")
+        col4.metric("Startup Hubs", f"{unique_cities}")
+
+        # Funding Over Time
+        st.subheader("📈 Funding Trends Over the Years")
+        yearly_funding = df.groupby('Starting Year')['Funding Amount in $'].sum().reset_index()
+        fig = px.area(yearly_funding, x='Starting Year', y='Funding Amount in $',
+                    title="Total Funding by Year",
+                    labels={'Funding Amount in $': 'Total Funding ($)', 'Starting Year': 'Year'})
+        fig.update_layout(xaxis_rangeslider_visible=True)
         st.plotly_chart(fig, use_container_width=True)
+
+        # Top Industries and Cities
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("🏭 Top Industries")
+            industries = df['Industries'].str.split(', ', expand=True).stack().value_counts().head(5)
+            fig = px.pie(values=industries.values, names=industries.index, hole=0.3,
+                        title="Top 5 Industries")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.subheader("🏙️ Top Startup Hubs")
+            cities = df['City'].value_counts().head(5)
+            fig = px.bar(x=cities.index, y=cities.values,
+                        labels={'x': 'City', 'y': 'Number of Startups'},
+                        title="Top 5 Cities by Number of Startups")
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Funding Distribution
+        st.subheader("💰 Funding Distribution")
+        fig = px.box(df, y="Funding Amount in $", points="all",
+                    title="Distribution of Funding Amounts")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Recent Success Stories
+        st.subheader("🌟 Recent Success Stories")
+        recent_successes = df.nlargest(5, 'Funding Amount in $')[['Company', 'City', 'Industries', 'Funding Amount in $']]
+        for _, company in recent_successes.iterrows():
+            with st.expander(f"{company['Company']} - ${company['Funding Amount in $']:,.0f}"):
+                st.write(f"**Location:** {company['City']}")
+                st.write(f"**Industry:** {company['Industries']}")
+                st.write(f"**Funding:** ${company['Funding Amount in $']:,.0f}")
+
+        # Call to Action
+        st.markdown("---")
+        st.markdown('<p class="big-font">Ready to dive deeper?</p>', unsafe_allow_html=True)
+        st.write("Explore our Data Exploration and Clustering Analysis tabs to uncover more insights about the Indian startup ecosystem.")
+
+        # Footer
+        st.markdown("---")
+        st.markdown("*Data last updated: [Insert Date]*")
+        st.markdown("Powered by Streamlit and Plotly | Created by [Your Name/Company]")
 
     elif page == "Data Exploration":
         st.title("🔍 Data Exploration")
         
-        # Interactive table
-        st.subheader("Dataset Viewer")
-        st.dataframe(df.style.background_gradient(cmap='Blues'))
+        # Quick Data Quality Check
+        missing_data = df.isnull().sum()
+        if missing_data.sum() > 0:
+            st.warning(f"There are {missing_data.sum()} missing values in the dataset. Consider handling these before analysis.")
+        else:
+            st.success("No missing values found in the dataset.")
+
+        # Funding Distribution
+        st.subheader("💰 Funding Distribution")
+        df['Funding Amount in $'] = pd.to_numeric(df['Funding Amount in $'].replace('[\$,]', '', regex=True), errors='coerce')
         
-        # Distribution of startups by city
-        st.subheader("🏙️ Distribution of Startups by City")
-        city_counts = df['City'].value_counts().head(10)
-        fig = px.bar(x=city_counts.index, y=city_counts.values, labels={'x': 'City', 'y': 'Number of Startups'},
-                     color=city_counts.values, color_continuous_scale=COLOR_PALETTE)
-        fig.update_layout(title="Top 10 Cities by Number of Startups")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Funding Amount Distribution
-        st.subheader("💰 Funding Amount Distribution")
-        fig = px.histogram(df, x="Funding Amount in $", nbins=50, title="Distribution of Funding Amounts",
-                           color_discrete_sequence=COLOR_PALETTE)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Correlation Heatmap
-        st.subheader("🔗 Correlation Heatmap")
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        corr = df[numeric_cols].corr()
-        fig = px.imshow(corr, text_auto=True, aspect="auto", color_continuous_scale=COLOR_PALETTE)
-        fig.update_layout(title="Correlation Heatmap of Numeric Features")
+        fig = px.histogram(df, x="Funding Amount in $", nbins=50, 
+                        title="Distribution of Funding Amounts",
+                        labels={"Funding Amount in $": "Funding Amount (USD)"})
+        fig.update_layout(bargap=0.1)
         st.plotly_chart(fig, use_container_width=True)
 
+        median_funding = df['Funding Amount in $'].median()
+        mean_funding = df['Funding Amount in $'].mean()
+        st.write(f"**Insight:** The median funding is ${median_funding:,.0f}, while the mean is ${mean_funding:,.0f}. "
+                f"This suggests a right-skewed distribution, with a few startups receiving significantly high funding.")
+
+        # Top Funded Startups
+        st.subheader("🏆 Top 10 Funded Startups")
+        top_funded = df.nlargest(10, 'Funding Amount in $')[['Company', 'Funding Amount in $', 'City']]
+        fig = px.bar(top_funded, x='Company', y='Funding Amount in $', color='City',
+                    title="Top 10 Funded Startups")
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+
+        top_company = top_funded.iloc[0]
+        st.write(f"**Insight:** {top_company['Company']} from {top_company['City']} leads with ${top_company['Funding Amount in $']:,.0f} in funding. "
+                f"The top 10 funded startups are from {top_funded['City'].nunique()} different cities.")
+
+        # Startup Distribution by City
+        st.subheader("🏙️ Startup Distribution by City")
+        city_counts = df['City'].value_counts().head(10)
+        fig = px.pie(values=city_counts.values, names=city_counts.index, title="Top 10 Cities by Number of Startups")
+        st.plotly_chart(fig, use_container_width=True)
+
+        top_city = city_counts.index[0]
+        st.write(f"**Insight:** {top_city} leads with {city_counts[top_city]} startups, representing {city_counts[top_city]/len(df):.1%} of all startups in the dataset.")
+
+        # Funding by Starting Year
+        st.subheader("📅 Funding Trends Over Years")
+        df['Starting Year'] = pd.to_numeric(df['Starting Year'], errors='coerce')
+        yearly_funding = df.groupby('Starting Year')['Funding Amount in $'].mean().reset_index()
+        fig = px.line(yearly_funding, x='Starting Year', y='Funding Amount in $',
+                    title="Average Funding Amount by Starting Year")
+        st.plotly_chart(fig, use_container_width=True)
+
+        peak_year = yearly_funding.loc[yearly_funding['Funding Amount in $'].idxmax()]
+        st.write(f"**Insight:** The peak average funding of ${peak_year['Funding Amount in $']:,.0f} was observed for startups founded in {peak_year['Starting Year']:.0f}.")
+
+        # Industry Analysis
+        st.subheader("🏭 Top Industries")
+        industries = df['Industries'].str.split(', ', expand=True).stack().value_counts().head(10)
+        fig = px.bar(x=industries.index, y=industries.values, title="Top 10 Industries")
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+
+        top_industry = industries.index[0]
+        st.write(f"**Insight:** The most prevalent industry is {top_industry} with {industries[top_industry]} startups, "
+                f"followed by {industries.index[1]} and {industries.index[2]}.")
+
+        # Correlation Heatmap
+        st.subheader("🔗 Correlation Heatmap")
+        numeric_cols = ['Starting Year', 'Funding Amount in $', 'Funding Round', 'No. of Investors']
+        df_corr = df[numeric_cols].copy()
+        df_corr['No. of Employees'] = df['No. of Employees'].apply(preprocess_employees)
+        df_corr['Funding Amount in $'] = pd.to_numeric(df_corr['Funding Amount in $'].replace('[\$,]', '', regex=True), errors='coerce')
+        df_corr['Starting Year'] = pd.to_numeric(df_corr['Starting Year'], errors='coerce')
+        
+        corr = df_corr.corr()
+        fig = px.imshow(corr, text_auto=True, aspect="auto", 
+                        title="Correlation Heatmap of Key Features")
+        st.plotly_chart(fig, use_container_width=True)
+
+        max_corr = corr.max().sort_values(ascending=False).iloc[1]
+        max_corr_features = corr.max().sort_values(ascending=False).index[:2]
+        st.write(f"**Insight:** The strongest correlation ({max_corr:.2f}) is between {max_corr_features[0]} and {max_corr_features[1]}.")
+
+
+    # Clustering Analysis Tab
     elif page == "Clustering Analysis":
         st.title("🧮 Clustering Analysis")
         
         features = st.multiselect("Select features for clustering", 
                                 ['Starting Year', 'No. of Employees', 'Funding Amount in $', 'Funding Round', 'No. of Investors'],
                                 default=['Funding Amount in $', 'No. of Employees', 'Starting Year'])
-        
-        # Data quality check
-        st.subheader("Data Quality Check")
-        for feature in features:
-            missing = df[feature].isna().sum()
-            not_available = (df[feature] == 'not available').sum()
-            st.write(f"{feature}:")
-            st.write(f"  - Missing values: {missing}")
-            st.write(f"  - 'Not available' values: {not_available}")
         
         algorithm = st.selectbox("Select clustering algorithm", ['K-Means', 'DBSCAN', 'Agglomerative', 'Gaussian Mixture'])
         
@@ -333,6 +456,10 @@ else:
                     with col2:
                         st.metric("Davies-Bouldin Score", f"{db_score:.2f}")
                     
+                    st.write(f"**Insight:** The clustering algorithm identified {len(set(labels))} distinct groups. "
+                            f"A Silhouette Score of {silhouette:.2f} suggests {'good' if silhouette > 0.5 else 'moderate' if silhouette > 0.3 else 'poor'} cluster separation. "
+                            f"The Davies-Bouldin Score of {db_score:.2f} indicates {'low' if db_score < 0.5 else 'moderate' if db_score < 1 else 'high'} cluster overlap.")
+                    
                     if algorithm in ['K-Means', 'Gaussian Mixture']:
                         if algorithm == 'K-Means':
                             centers = model.cluster_centers_
@@ -342,44 +469,45 @@ else:
                             st.subheader("Gaussian Component Means")
                         
                         centers_df = pd.DataFrame(centers, columns=features)
-                        st.dataframe(centers_df.style.background_gradient(cmap='YlOrRd'))
+                        st.dataframe(centers_df.style.background_gradient(cmap='YlOrRd'), use_container_width=True)
+                        
+                        st.write(f"**Insight:** The cluster centers reveal distinct patterns among the startups. "
+                                f"For example, Cluster 1 is characterized by {centers_df.iloc[0].idxmax()} "
+                                f"with a value of {centers_df.iloc[0].max():.2f}, while Cluster 2 stands out in {centers_df.iloc[1].idxmax()} "
+                                f"with {centers_df.iloc[1].max():.2f}.")
                     
                     st.subheader("Cluster Characteristics")
                     X_preprocessed['Cluster'] = labels
                     for cluster in range(len(set(labels))):
-                        st.write(f"Cluster {cluster}")
-                        cluster_data = X_preprocessed[X_preprocessed['Cluster'] == cluster]
-                        
-                        cols = st.columns(len(features))
-                        for i, feature in enumerate(features):
-                            with cols[i]:
-                                avg_value = cluster_data[feature].mean()
-                                if feature == 'Funding Amount in $':
-                                    st.metric(f"Avg {feature}", f"${avg_value:,.2f}" if pd.notnull(avg_value) else "N/A")
-                                elif feature == 'No. of Employees':
-                                    st.metric(f"Avg {feature}", f"{avg_value:,.0f}" if pd.notnull(avg_value) else "N/A")
-                                else:
-                                    st.metric(f"Avg {feature}", f"{avg_value:.2f}" if pd.notnull(avg_value) else "N/A")
+                        with st.expander(f"Cluster {cluster}"):
+                            cluster_data = X_preprocessed[X_preprocessed['Cluster'] == cluster]
+                            
+                            cols = st.columns(len(features))
+                            for i, feature in enumerate(features):
+                                with cols[i]:
+                                    avg_value = cluster_data[feature].mean()
+                                    if feature == 'Funding Amount in $':
+                                        st.metric(f"Avg {feature}", f"${avg_value:,.2f}")
+                                    elif feature == 'No. of Employees':
+                                        st.metric(f"Avg {feature}", f"{avg_value:,.0f}")
+                                    else:
+                                        st.metric(f"Avg {feature}", f"{avg_value:.2f}")
+                            
+                            st.write(f"**Insight:** Cluster {cluster} contains {len(cluster_data)} startups. "
+                                    f"It's distinguished by {'high' if avg_value > X_preprocessed[feature].mean() else 'low'} {feature} "
+                                    f"with an average of {avg_value:,.2f}.")
                 else:
                     st.error("Clustering failed. Please try different parameters or check your data.")
             else:
                 st.error("Preprocessing failed. Please check your data and try again.")
 
+    # Comparison Tab
     elif page == "Comparison":
         st.title("🔬 Algorithm Comparison")
         
         features = st.multiselect("Select features for clustering", 
                                 ['Starting Year', 'No. of Employees', 'Funding Amount in $', 'Funding Round', 'No. of Investors'],
                                 default=['Funding Amount in $', 'No. of Employees', 'Starting Year'])
-        
-        # Data quality check
-        st.subheader("Data Quality Check")
-        for feature in features:
-            missing = df[feature].isna().sum()
-            not_available = (df[feature] == 'not available').sum()
-            st.write(f"{feature}:")
-            st.write(f"  - Missing values: {missing}")
-            st.write(f"  - 'Not available' values: {not_available}")
         
         if st.button("Compare Algorithms"):
             with st.spinner("Preprocessing data..."):
@@ -424,29 +552,22 @@ else:
                     fig.update_traces(marker=dict(size=10))
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    st.subheader("Best Performing Algorithms")
                     best_silhouette = results_df.loc[results_df['Silhouette Score'].idxmax()]
                     best_db = results_df.loc[results_df['Davies-Bouldin Score'].idxmin()]
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Best Silhouette Score", f"{best_silhouette['Silhouette Score']:.2f}")
-                        st.write(f"Algorithm: {best_silhouette['Algorithm']}")
-                    with col2:
-                        st.metric("Best Davies-Bouldin Score", f"{best_db['Davies-Bouldin Score']:.2f}")
-                        st.write(f"Algorithm: {best_db['Algorithm']}")
+                    st.write(f"**Insight:** The best performing algorithm based on Silhouette Score is {best_silhouette['Algorithm']} "
+                            f"with a score of {best_silhouette['Silhouette Score']:.2f}. This suggests that this algorithm provides the best separation between clusters. "
+                            f"On the other hand, {best_db['Algorithm']} performs best in terms of Davies-Bouldin Score with a score of {best_db['Davies-Bouldin Score']:.2f}, "
+                            "indicating the lowest intra-cluster distances relative to the distances between clusters.")
                     
                     st.subheader("Detailed Results")
                     st.dataframe(results_df.style.background_gradient(cmap='RdYlGn', subset=['Silhouette Score'])
-                                .background_gradient(cmap='RdYlGn_r', subset=['Davies-Bouldin Score']))
+                                .background_gradient(cmap='RdYlGn_r', subset=['Davies-Bouldin Score']), use_container_width=True)
                     
-                    st.subheader("Algorithm Descriptions")
-                    st.write("""
-                    - **K-Means**: Partitions the data into k clusters, each represented by its centroid.
-                    - **DBSCAN**: Density-based clustering that groups together points that are closely packed together.
-                    - **Agglomerative**: Hierarchical clustering that builds nested clusters by merging them successively.
-                    - **Gaussian Mixture**: Probabilistic model that assumes the data is generated from a mixture of a finite number of Gaussian distributions.
-                    """)
+                    st.write(f"**Insight:** Among all algorithms tested, the average Silhouette Score is {results_df['Silhouette Score'].mean():.2f}, "
+                            f"and the average Davies-Bouldin Score is {results_df['Davies-Bouldin Score'].mean():.2f}. "
+                            f"{'K-Means' if 'K-Means' in results_df['Algorithm'].values else 'Gaussian Mixture'} with different cluster numbers shows varying performance, "
+                            "suggesting that the optimal number of clusters might depend on the specific characteristics of the startup data.")
                 else:
                     st.warning("No valid clustering results were obtained. Please try different parameters or check your data.")
             else:
@@ -458,37 +579,66 @@ else:
             st.warning("Please perform clustering analysis first to generate insights.")
         else:
             try:
-                with st.spinner("Generating insights..."):
-                    insights = generate_insights(df, st.session_state['labels'])
+                df_clustered = df.copy()
+                df_clustered['Cluster'] = st.session_state['labels']
+                df_clustered['Funding Amount in $'] = pd.to_numeric(df_clustered['Funding Amount in $'].replace('[\$,]', '', regex=True), errors='coerce')
+                df_clustered['No. of Employees'] = df_clustered['No. of Employees'].apply(preprocess_employees)
                 
-                for insight in insights:
-                    st.write("• " + insight)
+                st.subheader("🎯 Key Clustering Insights")
                 
-                st.subheader("Strategic Implications")
+                # Number of clusters
+                n_clusters = len(df_clustered['Cluster'].unique())
+                st.write(f"• The analysis identified {n_clusters} distinct clusters of startups.")
+                
+                # Funding distribution across clusters
+                cluster_funding = df_clustered.groupby('Cluster')['Funding Amount in $'].mean().sort_values(ascending=False)
+                top_cluster = cluster_funding.index[0]
+                bottom_cluster = cluster_funding.index[-1]
+                st.write(f"• Cluster {top_cluster} has the highest average funding (${cluster_funding[top_cluster]:,.0f}), "
+                        f"while Cluster {bottom_cluster} has the lowest (${cluster_funding[bottom_cluster]:,.0f}).")
+                
+                # Employee distribution
+                cluster_employees = df_clustered.groupby('Cluster')['No. of Employees'].mean().sort_values(ascending=False)
+                top_emp_cluster = cluster_employees.index[0]
+                st.write(f"• Cluster {top_emp_cluster} has the highest average number of employees ({cluster_employees[top_emp_cluster]:.0f}).")
+                
+                # Industry concentration
+                top_industry_cluster = df_clustered.groupby('Cluster')['Industries'].apply(lambda x: ', '.join(x).split(', ')).apply(pd.Series).stack().value_counts().index[0]
+                st.write(f"• The most common industry across all clusters is {top_industry_cluster}.")
+                
+                # Geographical patterns
+                top_city_cluster = df_clustered.groupby('Cluster')['City'].value_counts().index[0]
+                st.write(f"• {top_city_cluster[1]} has the highest representation in Cluster {top_city_cluster[0]}.")
+                
+                st.subheader("📊 Cluster Comparison")
+                
+                # Create a summary dataframe
+                summary = df_clustered.groupby('Cluster').agg({
+                    'Funding Amount in $': 'mean',
+                    'No. of Employees': 'mean',
+                    'Starting Year': lambda x: x.mode().iloc[0] if not x.mode().empty else np.nan,
+                    'No. of Investors': 'mean'
+                }).round(2)
+                
+                st.dataframe(summary.style.background_gradient(cmap='YlOrRd'), use_container_width=True)
+                
+                # Highlight key differences
+                oldest_cluster = summary['Starting Year'].idxmin()
+                newest_cluster = summary['Starting Year'].idxmax()
+                st.write(f"• Cluster {oldest_cluster} represents the oldest startups (most common year {summary.loc[oldest_cluster, 'Starting Year']:.0f}), "
+                        f"while Cluster {newest_cluster} represents the newest (most common year {summary.loc[newest_cluster, 'Starting Year']:.0f}).")
+                
+                max_investor_cluster = summary['No. of Investors'].idxmax()
+                st.write(f"• Cluster {max_investor_cluster} has attracted the most investors on average ({summary.loc[max_investor_cluster, 'No. of Investors']:.1f}).")
+                
+                st.subheader("🚀 Strategic Implications")
                 st.write("""
-                These insights can be leveraged by:
-                - 🎯 Investors: To identify promising startups and emerging trends for potential investments.
-                - 💼 Entrepreneurs: To understand the current startup landscape and position their ventures strategically.
-                - 🏛️ Policymakers: To develop targeted policies that foster startup ecosystems in various regions.
-                """)
-                
-                # Additional visualizations based on insights
-                st.subheader("Funding Distribution Across Clusters")
-                df_temp = df.copy()
-                df_temp['Cluster'] = st.session_state['labels']
-                df_temp['Funding Amount in $'] = df_temp['Funding Amount in $'].apply(lambda x: pd.to_numeric(str(x).replace(',', ''), errors='coerce'))
-                fig = px.box(df_temp, x='Cluster', y='Funding Amount in $', color='Cluster',
-                            title="Funding Distribution by Cluster")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                st.subheader("Average Employees per Cluster")
-                df_temp['No. of Employees'] = df_temp['No. of Employees'].apply(lambda x: pd.to_numeric(x.split('-')[0] if isinstance(x, str) and '-' in x else x, errors='coerce'))
-                avg_employees = df_temp.groupby('Cluster')['No. of Employees'].mean().sort_values(ascending=False)
-                fig = px.bar(x=avg_employees.index, y=avg_employees.values, 
-                            labels={'x': 'Cluster', 'y': 'Average Number of Employees'},
-                            title="Average Number of Employees by Cluster")
-                st.plotly_chart(fig, use_container_width=True)
+                Based on these insights:
+                - Investors might focus on startups in Cluster {top_cluster} for high-growth opportunities.
+                - Entrepreneurs could aim to position their startups similarly to those in Cluster {top_emp_cluster} for rapid scaling.
+                - Policymakers might consider initiatives to support diverse industry growth, given the concentration in {top_industry_cluster}.
+                """.format(top_cluster=top_cluster, top_emp_cluster=top_emp_cluster, top_industry_cluster=top_industry_cluster))
             
             except Exception as e:
                 st.error(f"An error occurred while generating insights: {str(e)}")
-                st.write("Please check your data and try again.")
+                st.write("Please check your data and try the clustering analysis again.")
